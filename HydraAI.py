@@ -154,7 +154,7 @@ def handle_message(message):
 
     full_prompt = f"{SYSTEM_PROMPT}\n\nSavol: {text}"
 
-    url = "BU_YERGA_API_URL"
+    url = "OPENAI_API_KEY"
     params = {"q": full_prompt}
 
     try:
