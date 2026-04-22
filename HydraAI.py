@@ -171,7 +171,13 @@ def handle_message(message):
 
     full_prompt = f"{SYSTEM_PROMPT}\n\nSavol: {text}"
 
-    url = "OPENAI_API_KEY"
+    @bot.message_handler(func=lambda m: True)
+def handle_message(message):
+    try:
+        answer = ask_ai(message.text)
+        bot.reply_to(message, answer)
+    except Exception as e:
+        bot.reply_to(message, f"Xato: {e}")
     params = {"q": full_prompt}
 
     try:
