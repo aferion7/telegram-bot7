@@ -7,7 +7,24 @@ import threading
 import os
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+def ask_ai(user_text):
+    url = "https://api.openai.com/v1/responses"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": "gpt-4.1-mini",
+        "input": user_text
+    }
+
+    r = requests.post(url, headers=headers, json=data, timeout=60)
+    r.raise_for_status()
+    result = r.json()
+
+    return result["output"][0]["content"][0]["text"]
 # === CONFIG ===
 BOT_TOKEN = ("8799005350:AAFHmFzLKMOrKg5qoRnUN-hsrFY_wBQtTtw")
 ADMIN_ID = [7304157931]
