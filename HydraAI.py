@@ -9,7 +9,7 @@ from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # === CONFIG ===
-BOT_TOKEN = os.getenv("8799005350:AAFHmFzLKMOrKg5qoRnUN-hsrFY_wBQtTtw")
+BOT_TOKEN = ("8799005350:AAFHmFzLKMOrKg5qoRnUN-hsrFY_wBQtTtw")
 ADMIN_ID = [7304157931]
 
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode=None)
