@@ -1,10 +1,12 @@
 import os
 import re
 from telethon import TelegramClient, events
+from dotenv import load_dotenv
+load_dotenv()
 
-api_id = 31381782          # o'zingni API ID
-api_hash = "0a704aac96f59c210f9b85701c4985ac"    # o'zingni API HASH
-bot_token = "8799005350:AAFHmFzLKMOrKg5qoRnUN-hsrFY_wBQtTtw"  # BotFather bergan token
+api_id = int(os.getenv("API_ID"))          # o'zingni API ID
+api_hash = os.getenv("API_HASH" )   # o'zingni API HASH
+bot_token = os.getenv("BOT_TOKEN")  # BotFather bergan token
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
