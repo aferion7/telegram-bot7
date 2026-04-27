@@ -3,6 +3,19 @@ import re
 from telethon import TelegramClient, events
 from dotenv import load_dotenv
 load_dotenv()
+from flask import Flask
+import threading
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot ishlayapti"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
+threading.Thread(target=run_web).start()
 
 api_id = int(os.getenv("API_ID"))          # o'zingni API ID
 api_hash = os.getenv("API_HASH" )   # o'zingni API HASH
