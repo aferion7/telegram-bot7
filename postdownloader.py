@@ -50,8 +50,7 @@ def parse_link(link):
 
 @bot.on(events.NewMessage(pattern="/start"))
 async def start(event):
-    await event.reply("Hello there!✌️
-    Post link yubor. Masalan:\nhttps://t.me/c/1234567890/45")
+    await event.reply("Hello there!✌️Post link yubor. Masalan:\nhttps://t.me/c/1234567890/45")
 
 
 @bot.on(events.NewMessage)
