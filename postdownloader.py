@@ -1,103 +1,61 @@
 import os
-import re
-from telethon import TelegramClient, events
+from telegram import Update, InputMediaPhoto, InputMediaVideo
+from telegram.ext import Updater, CommandHandler, CallbackContext
 from dotenv import load_dotenv
+
 load_dotenv()
-from flask import Flask
-import threading
-app = Flask(__name__)
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-@app.route("/")
-def home():
-    return "Bot ishlayapti"
+# Admin user ID
+ADMIN_ID = 7304157931  # o'zingizning ID
 
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+# Kanal username yoki ID (bot admin bo'lishi kerak)
+SECRET_CHANNEL_ID = -1005433716096181076810  # yoki -1001234567890
 
-threading.Thread(target=run_web).start()
+# Botni ishga tushiramiz
+updater = Updater(token=BOT_TOKEN, use_context=True)
+dispatcher = updater.dispatcher
 
-api_id = int(os.getenv("API_ID"))          # o'zingni API ID
-api_hash = os.getenv("API_HASH" )   # o'zingni API HASH
-bot_token = os.getenv("BOT_TOKEN")  # BotFather bergan token
-
-DOWNLOAD_DIR = "downloads"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-user = TelegramClient("user_session", api_id, api_hash)
-bot = TelegramClient("bot_session", api_id, api_hash)
-
-
-def parse_link(link):
-    link = link.split("?")[0].strip()
-
-    # private link: https://t.me/c/1234567890/45
-    m = re.search(r"t\.me/c/(\d+)/(\d+)", link)
-    if m:
-        channel_id = int("-100" + m.group(1))
-        post_id = int(m.group(2))
-        return channel_id, post_id
-
-    # public link: https://t.me/channelusername/45
-    m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)", link)
-    if m:
-        channel = m.group(1)
-        post_id = int(m.group(2))
-        return channel, post_id
-
-    return None, None
-
-
-@bot.on(events.NewMessage(pattern="/start"))
-async def start(event):
-    await event.reply("Hello there!✌️Post link yubor. Masalan:\nhttps://t.me/c/1234567890/45")
-
-
-@bot.on(events.NewMessage)
-async def handler(event):
-    text = event.raw_text.strip()
-
-    if "t.me/" not in text:
-        return
-
-    await event.reply("⏳ Yuklayapman...")
-
-    channel, post_id = parse_link(text)
-
-    if not channel:
-        await event.reply("❌ Link noto‘g‘ri.")
+# Oxirgi N postlarni kanaladan olish
+def get_latest_posts(update: Update, context: CallbackContext):
+    if update.message.from_user.id != ADMIN_ID:
+        update.message.reply_text("Faqat admin ishlata oladi.")
         return
 
     try:
-        entity = await user.get_entity(channel)
-        post = await user.get_messages(entity, ids=post_id)
+        num_posts = int(context.args[0]) if context.args else 5  # default 5 post
+    except ValueError:
+        update.message.reply_text("Iltimos, son kiriting: /getlatest 5")
+        return
 
-        if not post:
-            await event.reply("❌ Post topilmadi. Kanalga a’zo ekaningni tekshir.")
-            return
+    # Postlarni olish
+    channel = context.bot.get_chat(SECRET_CHANNEL_ID)
+    messages = channel.get_history(limit=num_posts)  # Bot API bilan cheklangan
 
-        caption = post.text or "Media"
+    if not messages:
+        update.message.reply_text("Hech qanday post topilmadi.")
+        return
 
-        if post.media:
-            file_path = await user.download_media(post, file=DOWNLOAD_DIR)
-            await bot.send_file(
-                event.chat_id,
-                file_path,
-                caption=caption[:1000]
-            )
-        else:
-            await event.reply(caption)
+    for msg in messages:
+        if msg.text:
+            context.bot.send_message(chat_id=ADMIN_ID, text=msg.text)
+        if msg.photo:
+            file_id = msg.photo[-1].file_id
+            context.bot.send_photo(chat_id=ADMIN_ID, photo=file_id)
+        if msg.video:
+            file_id = msg.video.file_id
+            context.bot.send_video(chat_id=ADMIN_ID, video=file_id)
 
-    except Exception as e:
-        await event.reply(f"❌ Xato:\n{e}")
+    update.message.reply_text(f"{len(messages)} post yuklandi ✅")
 
+# /start buyrug'i
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text("Salom! Bot kanal postlarini yuklashga tayyor.")
 
-async def main():
-    await user.start()
-    await bot.start(bot_token=bot_token)
-    print("Bot ishlayapti...")
-    await bot.run_until_disconnected()
+# Handlerlar
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("getlatest", get_latest_posts, pass_args=True))
 
-
-with user:
-    user.loop.run_until_complete(main())
+# Botni ishga tushiramiz
+updater.start_polling()
+updater.idle()
