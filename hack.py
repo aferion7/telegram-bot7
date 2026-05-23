@@ -9,6 +9,7 @@ from threading import Thread
 
 from telethon import TelegramClient, events, Button
 from telethon.tl.functions.stories import GetStoriesByIDRequest
+from telethon.tl.types import InputPeerUser, InputPeerChannel
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,24 +26,14 @@ IG_USERNAME = os.getenv("IG_USERNAME")
 IG_PASSWORD = os.getenv("IG_PASSWORD")
 
 DOWNLOAD_DIR = "downloads"
-
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # =====================================
 # CLIENTS
 # =====================================
 
-user = TelegramClient(
-    "user_session",
-    api_id,
-    api_hash
-)
-
-bot = TelegramClient(
-    "bot_session",
-    api_id,
-    api_hash
-)
+user = TelegramClient("user_session", api_id, api_hash)
+bot = TelegramClient("bot_session", api_id, api_hash)
 
 # =====================================
 # INSTAGRAM
@@ -53,13 +44,25 @@ L = instaloader.Instaloader(
     download_videos=True,
     download_video_thumbnails=False,
     save_metadata=False,
-    compress_json=False
+    compress_json=False,
+    quiet=True
 )
+
+ig_logged_in = False
 
 if IG_USERNAME and IG_PASSWORD:
     try:
-        L.login(IG_USERNAME, IG_PASSWORD)
-        print("Instagram login success")
+        # Avval session faylidan login qilishga urinish
+        session_file = f"{IG_USERNAME}.session"
+        if os.path.exists(session_file):
+            L.load_session_from_file(IG_USERNAME, session_file)
+            ig_logged_in = True
+            print("Instagram session loaded")
+        else:
+            L.login(IG_USERNAME, IG_PASSWORD)
+            L.save_session_to_file(session_file)
+            ig_logged_in = True
+            print("Instagram login success")
     except Exception as e:
         print("Instagram login error:", e)
 
@@ -86,30 +89,35 @@ def clean_downloads():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 
-def get_latest_file():
+def get_all_media_files():
+    """Barcha media fayllarni qaytaradi"""
     files = glob.glob(f"{DOWNLOAD_DIR}/**/*", recursive=True)
     files = [
         f for f in files
         if os.path.isfile(f)
         and not f.endswith(".json")
         and not f.endswith(".txt")
+        and not f.endswith(".xz")
     ]
-    if not files:
-        return None
-    return max(files, key=os.path.getctime)
+    return sorted(files, key=os.path.getctime)
+
+
+def get_latest_file():
+    files = get_all_media_files()
+    return files[-1] if files else None
 
 
 def parse_telegram_post(link):
     link = link.split("?")[0].strip()
 
-    # private
+    # private: t.me/c/123456/789
     m = re.search(r"t\.me/c/(\d+)/(\d+)", link)
     if m:
         channel_id = int("-100" + m.group(1))
         post_id = int(m.group(2))
         return channel_id, post_id
 
-    # public
+    # public: t.me/username/789
     m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)", link)
     if m:
         channel = m.group(1)
@@ -120,11 +128,10 @@ def parse_telegram_post(link):
 
 
 def parse_telegram_story(link):
+    # t.me/username/s/123
     m = re.search(r"t\.me/([A-Za-z0-9_]+)/s/(\d+)", link)
     if m:
-        username = m.group(1)
-        story_id = int(m.group(2))
-        return username, story_id
+        return m.group(1), int(m.group(2))
     return None, None
 
 # =====================================
@@ -163,10 +170,13 @@ async def handler(event):
 
     elif text == "ℹ️ Help":
         await event.reply(
-            "Bot:\n"
-            "- Telegram post yuklaydi\n"
-            "- Telegram story yuklaydi\n"
-            "- Instagram reel/post/story yuklaydi"
+            "📌 Bot imkoniyatlari:\n\n"
+            "• @username → oxirgi postni yuklaydi\n"
+            "• t.me/username/123 → telegram post\n"
+            "• t.me/username/s/123 → telegram story\n"
+            "• instagram.com/p/... → instagram post\n"
+            "• instagram.com/reel/... → instagram reel\n"
+            "• instagram.com/stories/... → instagram story"
         )
         return
 
@@ -177,51 +187,60 @@ async def handler(event):
     if "http" not in text and not text.startswith("@"):
         return
 
+    # =========================
+    # TELEGRAM @USERNAME
+    # =========================
+
+    if text.startswith("@"):
+        username = text.lstrip("@").strip()
+        await event.reply(f"⏳ @{username} dan yuklanmoqda...")
+
+        try:
+            entity = await user.get_entity(username)
+        except Exception as e:
+            await event.reply(f"❌ Username topilmadi: {e}")
+            return
+
+        try:
+            messages = await user.get_messages(entity, limit=5)
+        except Exception as e:
+            await event.reply(f"❌ Xabarlarni olib bo'lmadi: {e}")
+            return
+
+        # Media topish
+        post = None
+        for msg in messages:
+            if msg and msg.media:
+                post = msg
+                break
+
+        if not post:
+            # Media yo'q bo'lsa oxirgi xabarni yubor
+            if messages and messages[0]:
+                await event.reply(messages[0].text or "❌ Media topilmadi.")
+            else:
+                await event.reply("❌ Hech narsa topilmadi.")
+            return
+
+        try:
+            file_path = await user.download_media(post, file=DOWNLOAD_DIR)
+            caption = (post.text or "")[:1000]
+            await bot.send_file(event.chat_id, file_path, caption=caption)
+            os.remove(file_path)
+        except Exception as e:
+            await event.reply(f"❌ Yuborishda xato: {e}")
+
+        return
+
     await event.reply("⏳ Yuklayapman...")
 
     try:
 
         # =====================================
-        # TELEGRAM USERNAME
+        # TELEGRAM STORY LINK
         # =====================================
 
-        if text.startswith("@"):
-            username = text.replace("@", "").strip()
-
-            try:
-                entity = await user.get_entity(username)
-            except Exception:
-                await event.reply("❌ Username topilmadi.")
-                return
-
-            try:
-                # user client orqali (bot emas!)
-                posts = await user.get_messages(entity, limit=1)
-                if not posts:
-                    await event.reply("❌ Post topilmadi.")
-                    return
-                post = posts[0]
-            except Exception as e:
-                await event.reply(
-                    f"❌ Bu username uchun post olib bo'lmadi.\n{e}"
-                )
-                return
-
-            caption = post.text or ""
-
-            if post.media:
-                file_path = await user.download_media(post, file=DOWNLOAD_DIR)
-                await bot.send_file(event.chat_id, file_path, caption=caption[:1000])
-            else:
-                await event.reply(caption)
-
-            return
-
-        # =====================================
-        # TELEGRAM STORY
-        # =====================================
-
-        elif "t.me/" in text and "/s/" in text:
+        if "t.me/" in text and "/s/" in text:
             username, story_id = parse_telegram_story(text)
 
             if not username:
@@ -239,22 +258,26 @@ async def handler(event):
                 )
 
                 if not result.stories:
-                    await event.reply("❌ Story topilmadi.")
+                    await event.reply("❌ Story topilmadi yoki muddati o'tgan.")
                     return
 
                 story = result.stories[0]
-
                 file_path = await user.download_media(story.media, file=DOWNLOAD_DIR)
 
-                await bot.send_file(event.chat_id, file_path, caption="Telegram Story")
+                if not file_path:
+                    await event.reply("❌ Story media yuklanmadi.")
+                    return
+
+                await bot.send_file(event.chat_id, file_path, caption="📖 Telegram Story")
+                os.remove(file_path)
 
             except Exception as e:
-                await event.reply(f"❌ Story yuklab bo'lmadi.\n{e}")
+                await event.reply(f"❌ Story yuklab bo'lmadi:\n{e}")
 
             return
 
         # =====================================
-        # TELEGRAM POST
+        # TELEGRAM POST LINK
         # =====================================
 
         elif "t.me/" in text:
@@ -272,16 +295,17 @@ async def handler(event):
                     await event.reply("❌ Post topilmadi yoki kanalga a'zo emassiz.")
                     return
 
-                caption = post.text or ""
+                caption = (post.text or "")[:1000]
 
                 if post.media:
                     file_path = await user.download_media(post, file=DOWNLOAD_DIR)
-                    await bot.send_file(event.chat_id, file_path, caption=caption[:1000])
+                    await bot.send_file(event.chat_id, file_path, caption=caption)
+                    os.remove(file_path)
                 else:
-                    await event.reply(caption)
+                    await event.reply(caption or "❌ Bu postda media yo'q.")
 
             except Exception as e:
-                await event.reply(f"❌ Post yuklab bo'lmadi.\n{e}")
+                await event.reply(f"❌ Post yuklab bo'lmadi:\n{e}")
 
             return
 
@@ -290,73 +314,83 @@ async def handler(event):
         # =====================================
 
         elif "instagram.com" in text:
+
+            if not ig_logged_in:
+                await event.reply("❌ Instagram login sozlanmagan.")
+                return
+
             clean_downloads()
 
-            shortcode = None
-
-            # reel
-            m = re.search(r"/reel/([^/?]+)", text)
-            if m:
-                shortcode = m.group(1)
-
-            # post
-            if not shortcode:
-                m = re.search(r"/p/([^/?]+)", text)
-                if m:
-                    shortcode = m.group(1)
-
-            # story
+            # --- INSTAGRAM STORY ---
             if "/stories/" in text:
-                m = re.search(r"instagram\.com/stories/([^/]+)/(\d+)", text)
+                m = re.search(r"instagram\.com/stories/([^/?]+)", text)
 
                 if not m:
                     await event.reply("❌ Story link noto'g'ri.")
                     return
 
-                ig_username = m.group(1)
+                ig_user = m.group(1)
 
                 try:
-                    profile = instaloader.Profile.from_username(L.context, ig_username)
+                    profile = instaloader.Profile.from_username(L.context, ig_user)
+
+                    if profile.is_private:
+                        await event.reply("❌ Bu akkaunt private, story yuklab bo'lmaydi.")
+                        return
 
                     found = False
-
                     for story in L.get_stories(userids=[profile.userid]):
                         for item in story.get_items():
                             L.download_storyitem(item, target=DOWNLOAD_DIR)
                             found = True
 
                     if not found:
-                        await event.reply("❌ Story topilmadi yoki foydalanuvchi private.")
+                        await event.reply("❌ Hozirda active story yo'q.")
                         return
 
-                    file_path = get_latest_file()
+                    media_files = get_all_media_files()
 
-                    if not file_path:
+                    if not media_files:
                         await event.reply("❌ Yuklab bo'lmadi.")
                         return
 
-                    await bot.send_file(event.chat_id, file_path, caption="Instagram Story")
+                    for f in media_files:
+                        await bot.send_file(event.chat_id, f, caption="📸 Instagram Story")
 
                 except Exception as e:
                     await event.reply(f"❌ Instagram story xatosi:\n{e}")
 
                 return
 
-            # reel/post
+            # --- INSTAGRAM REEL / POST ---
+            shortcode = None
+
+            m = re.search(r"/reel/([^/?]+)", text)
+            if m:
+                shortcode = m.group(1)
+
+            if not shortcode:
+                m = re.search(r"/p/([^/?]+)", text)
+                if m:
+                    shortcode = m.group(1)
+
             if shortcode:
                 try:
                     post = instaloader.Post.from_shortcode(L.context, shortcode)
                     L.download_post(post, target=DOWNLOAD_DIR)
 
-                    file_path = get_latest_file()
+                    media_files = get_all_media_files()
 
-                    if not file_path:
+                    if not media_files:
                         await event.reply("❌ Media topilmadi.")
                         return
 
-                    caption = post.caption or ""
+                    caption = (post.caption or "")[:1000]
 
-                    await bot.send_file(event.chat_id, file_path, caption=caption[:1000])
+                    # Ko'p media bo'lsa hammasini yuborish
+                    for i, f in enumerate(media_files):
+                        cap = caption if i == 0 else ""
+                        await bot.send_file(event.chat_id, f, caption=cap)
 
                 except Exception as e:
                     await event.reply(f"❌ Instagram xatosi:\n{e}")
@@ -370,7 +404,7 @@ async def handler(event):
             await event.reply("❌ Qo'llab-quvvatlanmaydi.")
 
     except Exception as e:
-        await event.reply(f"❌ Xato:\n{e}")
+        await event.reply(f"❌ Umumiy xato:\n{e}")
 
 # =====================================
 # MAIN
