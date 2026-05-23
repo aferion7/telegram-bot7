@@ -1,61 +1,468 @@
 import os
-from telegram import Update, InputMediaPhoto, InputMediaVideo
-from telegram.ext import Updater, CommandHandler, CallbackContext
+import re
+import glob
+import shutil
+import instaloader
+
+from telethon import TelegramClient, events
+from telethon.tl.functions.stories import GetStoriesByIDRequest
 from dotenv import load_dotenv
 
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Admin user ID
-ADMIN_ID = 7304157931  # o'zingizning ID
+# =====================================
+# CONFIG
+# =====================================
 
-# Kanal username yoki ID (bot admin bo'lishi kerak)
-SECRET_CHANNEL_ID = -1005433716096181076810  # yoki -1001234567890
+api_id = int(os.getenv("API_ID"))
+api_hash = os.getenv("API_HASH")
+bot_token = os.getenv("BOT_TOKEN")
 
-# Botni ishga tushiramiz
-updater = Updater(token=BOT_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
+# Instagram login (optional)
+IG_USERNAME = os.getenv("IG_USERNAME")
+IG_PASSWORD = os.getenv("IG_PASSWORD")
 
-# Oxirgi N postlarni kanaladan olish
-def get_latest_posts(update: Update, context: CallbackContext):
-    if update.message.from_user.id != ADMIN_ID:
-        update.message.reply_text("Faqat admin ishlata oladi.")
+DOWNLOAD_DIR = "downloads"
+
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+# =====================================
+# CLIENTS
+# =====================================
+
+user = TelegramClient(
+    "user_session",
+    api_id,
+    api_hash
+)
+
+bot = TelegramClient(
+    "bot_session",
+    api_id,
+    api_hash
+)
+
+# =====================================
+# INSTAGRAM
+# =====================================
+
+L = instaloader.Instaloader(
+    dirname_pattern=DOWNLOAD_DIR,
+    download_videos=True,
+    download_video_thumbnails=False,
+    save_metadata=False,
+    compress_json=False
+)
+
+if IG_USERNAME and IG_PASSWORD:
+    try:
+        L.login(IG_USERNAME, IG_PASSWORD)
+        print("Instagram login success")
+    except Exception as e:
+        print("Instagram login error:", e)
+
+# =====================================
+# HELPERS
+# =====================================
+
+def clean_downloads():
+
+    if os.path.exists(DOWNLOAD_DIR):
+        shutil.rmtree(DOWNLOAD_DIR)
+
+    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+
+
+def get_latest_file():
+
+    files = glob.glob(
+        f"{DOWNLOAD_DIR}/**/*",
+        recursive=True
+    )
+
+    files = [
+        f for f in files
+        if os.path.isfile(f)
+        and not f.endswith(".json")
+        and not f.endswith(".txt")
+    ]
+
+    if not files:
+        return None
+
+    return max(files, key=os.path.getctime)
+
+
+def parse_telegram_post(link):
+
+    link = link.split("?")[0].strip()
+
+    # private link
+    m = re.search(
+        r"t\.me/c/(\d+)/(\d+)",
+        link
+    )
+
+    if m:
+        channel_id = int("-100" + m.group(1))
+        post_id = int(m.group(2))
+        return channel_id, post_id
+
+    # public link
+    m = re.search(
+        r"t\.me/([A-Za-z0-9_]+)/(\d+)",
+        link
+    )
+
+    if m:
+        channel = m.group(1)
+        post_id = int(m.group(2))
+        return channel, post_id
+
+    return None, None
+
+
+def parse_telegram_story(link):
+
+    # https://t.me/username/s/12
+
+    m = re.search(
+        r"t\.me/([A-Za-z0-9_]+)/s/(\d+)",
+        link
+    )
+
+    if m:
+        username = m.group(1)
+        story_id = int(m.group(2))
+
+        return username, story_id
+
+    return None, None
+
+
+# =====================================
+# START
+# =====================================
+
+@bot.on(events.NewMessage(pattern="/start"))
+async def start(event):
+
+    await event.reply(
+        "📥 Send me:\n\n"
+        "• Telegram post link\n"
+        "• Telegram story link\n"
+        "• Telegram username (@username)\n"
+        "• Instagram reel/post/story link"
+    )
+
+
+# =====================================
+# MAIN HANDLER
+# =====================================
+
+@bot.on(events.NewMessage)
+async def handler(event):
+
+    text = event.raw_text.strip()
+
+    if (
+        "http" not in text
+        and not text.startswith("@")
+    ):
         return
+
+    await event.reply("⏳ Yuklayapman...")
 
     try:
-        num_posts = int(context.args[0]) if context.args else 5  # default 5 post
-    except ValueError:
-        update.message.reply_text("Iltimos, son kiriting: /getlatest 5")
-        return
 
-    # Postlarni olish
-    channel = context.bot.get_chat(SECRET_CHANNEL_ID)
-    messages = channel.get_history(limit=num_posts)  # Bot API bilan cheklangan
+        # =====================================
+        # TELEGRAM USERNAME
+        # =====================================
 
-    if not messages:
-        update.message.reply_text("Hech qanday post topilmadi.")
-        return
+        if text.startswith("@"):
 
-    for msg in messages:
-        if msg.text:
-            context.bot.send_message(chat_id=ADMIN_ID, text=msg.text)
-        if msg.photo:
-            file_id = msg.photo[-1].file_id
-            context.bot.send_photo(chat_id=ADMIN_ID, photo=file_id)
-        if msg.video:
-            file_id = msg.video.file_id
-            context.bot.send_video(chat_id=ADMIN_ID, video=file_id)
+            username = text.replace("@", "").strip()
 
-    update.message.reply_text(f"{len(messages)} post yuklandi ✅")
+            entity = await user.get_entity(username)
 
-# /start buyrug'i
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text("Salom! Bot kanal postlarini yuklashga tayyor.")
+            posts = await user.get_messages(
+                entity,
+                limit=1
+            )
 
-# Handlerlar
-dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(CommandHandler("getlatest", get_latest_posts, pass_args=True))
+            if not posts:
+                await event.reply("❌ Post topilmadi.")
+                return
 
-# Botni ishga tushiramiz
-updater.start_polling()
-updater.idle()
+            post = posts[0]
+
+            caption = post.text or ""
+
+            if post.media:
+
+                file_path = await user.download_media(
+                    post,
+                    file=DOWNLOAD_DIR
+                )
+
+                await bot.send_file(
+                    event.chat_id,
+                    file_path,
+                    caption=caption[:1000]
+                )
+
+            else:
+                await event.reply(caption)
+
+            return
+
+        # =====================================
+        # TELEGRAM STORY
+        # =====================================
+
+        elif "t.me/" in text and "/s/" in text:
+
+            username, story_id = parse_telegram_story(text)
+
+            if not username:
+                await event.reply(
+                    "❌ Story link noto‘g‘ri."
+                )
+                return
+
+            entity = await user.get_entity(username)
+
+            result = await user(
+                GetStoriesByIDRequest(
+                    peer=entity,
+                    id=[story_id]
+                )
+            )
+
+            if not result.stories:
+                await event.reply(
+                    "❌ Story topilmadi."
+                )
+                return
+
+            story = result.stories[0]
+
+            file_path = await user.download_media(
+                story.media,
+                file=DOWNLOAD_DIR
+            )
+
+            await bot.send_file(
+                event.chat_id,
+                file_path,
+                caption="Telegram Story"
+            )
+
+            return
+
+        # =====================================
+        # TELEGRAM POST LINK
+        # =====================================
+
+        elif "t.me/" in text:
+
+            channel, post_id = parse_telegram_post(text)
+
+            if not channel:
+                await event.reply(
+                    "❌ Link noto‘g‘ri."
+                )
+                return
+
+            entity = await user.get_entity(channel)
+
+            post = await user.get_messages(
+                entity,
+                ids=post_id
+            )
+
+            if not post:
+                await event.reply(
+                    "❌ Post topilmadi yoki kanalga a’zo emassiz."
+                )
+                return
+
+            caption = post.text or ""
+
+            if post.media:
+
+                file_path = await user.download_media(
+                    post,
+                    file=DOWNLOAD_DIR
+                )
+
+                await bot.send_file(
+                    event.chat_id,
+                    file_path,
+                    caption=caption[:1000]
+                )
+
+            else:
+                await event.reply(caption)
+
+            return
+
+        # =====================================
+        # INSTAGRAM
+        # =====================================
+
+        elif "instagram.com" in text:
+
+            clean_downloads()
+
+            shortcode = None
+
+            # reel
+            m = re.search(
+                r"/reel/([^/?]+)",
+                text
+            )
+
+            if m:
+                shortcode = m.group(1)
+
+            # post
+            if not shortcode:
+
+                m = re.search(
+                    r"/p/([^/?]+)",
+                    text
+                )
+
+                if m:
+                    shortcode = m.group(1)
+
+            # story
+            if "/stories/" in text:
+
+                m = re.search(
+                    r"instagram\.com/stories/([^/]+)/(\d+)",
+                    text
+                )
+
+                if not m:
+                    await event.reply(
+                        "❌ Story link noto‘g‘ri."
+                    )
+                    return
+
+                username = m.group(1)
+
+                profile = (
+                    instaloader.Profile.from_username(
+                        L.context,
+                        username
+                    )
+                )
+
+                found = False
+
+                for story in L.get_stories(
+                    userids=[profile.userid]
+                ):
+
+                    for item in story.get_items():
+
+                        L.download_storyitem(
+                            item,
+                            target=DOWNLOAD_DIR
+                        )
+
+                        found = True
+
+                if not found:
+                    await event.reply(
+                        "❌ Story topilmadi."
+                    )
+                    return
+
+                file_path = get_latest_file()
+
+                if not file_path:
+                    await event.reply(
+                        "❌ Yuklab bo‘lmadi."
+                    )
+                    return
+
+                await bot.send_file(
+                    event.chat_id,
+                    file_path,
+                    caption="Instagram Story"
+                )
+
+                return
+
+            # reel/post
+            if shortcode:
+
+                post = instaloader.Post.from_shortcode(
+                    L.context,
+                    shortcode
+                )
+
+                L.download_post(
+                    post,
+                    target=DOWNLOAD_DIR
+                )
+
+                file_path = get_latest_file()
+
+                if not file_path:
+                    await event.reply(
+                        "❌ Media topilmadi."
+                    )
+                    return
+
+                caption = post.caption or ""
+
+                await bot.send_file(
+                    event.chat_id,
+                    file_path,
+                    caption=caption[:1000]
+                )
+
+                return
+
+            await event.reply(
+                "❌ Instagram link tushunilmadi."
+            )
+
+            return
+
+        else:
+
+            await event.reply(
+                "❌ Qo‘llab-quvvatlanmaydi."
+            )
+
+    except Exception as e:
+
+        await event.reply(
+            f"❌ Xato:\n{e}"
+        )
+
+
+# =====================================
+# MAIN
+# =====================================
+
+async def main():
+
+    await user.start()
+
+    await bot.start(
+        bot_token=bot_token
+    )
+
+    print("Bot ishlayapti...")
+
+    await bot.run_until_disconnected()
+
+
+with user:
+    user.loop.run_until_complete(main())
