@@ -227,50 +227,62 @@ async def handler(event):
 
     try:
 
-        # =====================================
-        # TELEGRAM USERNAME
-        # =====================================
+      # =====================================
+# TELEGRAM USERNAME
+# =====================================
 
-        if text.startswith("@"):
+if text.startswith("@"):
 
-            username = text.replace("@", "").strip()
+    username = text.replace("@", "").strip()
 
-            entity = await user.get_entity(username)
+    try:
+        entity = await user.get_entity(username)
 
-            post = None
+    except:
+        await event.reply("❌ Username topilmadi.")
+        return
 
-            async for msg in user.iter_messages(
-                entity,
-                limit=1
-            ):
-                post = msg
+    try:
 
-            if not post:
-                await event.reply(
-                    "❌ Post topilmadi."
-                )
-                return
+        posts = await user.get_messages(
+            entity,
+            limit=1
+        )
 
-            caption = post.text or ""
-
-            if post.media:
-
-                file_path = await user.download_media(
-                    post,
-                    file=DOWNLOAD_DIR
-                )
-
-                await bot.send_file(
-                    event.chat_id,
-                    file_path,
-                    caption=caption[:1000]
-                )
-
-            else:
-                await event.reply(caption)
-
+        if not posts:
+            await event.reply("❌ Post topilmadi.")
             return
 
+        post = posts[0]
+
+    except Exception as e:
+
+        await event.reply(
+            "❌ Bu username uchun post olib bo‘lmadi.\n"
+            "Kanal public ekanligini tekshiring."
+        )
+
+        return
+
+    caption = post.text or ""
+
+    if post.media:
+
+        file_path = await user.download_media(
+            post,
+            file=DOWNLOAD_DIR
+        )
+
+        await bot.send_file(
+            event.chat_id,
+            file_path,
+            caption=caption[:1000]
+        )
+
+    else:
+        await event.reply(caption)
+
+    return
         # =====================================
         # TELEGRAM STORY
         # =====================================
