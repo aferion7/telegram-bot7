@@ -4,7 +4,7 @@ import glob
 import shutil
 import instaloader
 
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, Button
 from telethon.tl.functions.stories import GetStoriesByIDRequest
 from dotenv import load_dotenv
 
@@ -147,12 +147,15 @@ def parse_telegram_story(link):
 @bot.on(events.NewMessage(pattern="/start"))
 async def start(event):
 
-    await event.reply(
-        "📥 Send me:\n\n"
-        "• Telegram post link\n"
-        "• Telegram story link\n"
-        "• Telegram username (@username)\n"
-        "• Instagram reel/post/story link"
+    buttons = [
+        [Button.text("📥 Telegram Post")],
+        [Button.text("📸 Instagram")],
+        [Button.text("ℹ️ Help")]
+    ]
+
+    await event.respond(
+        "Kerakli bo‘limni tanlang:",
+        buttons=buttons
     )
 
 
@@ -164,6 +167,26 @@ async def start(event):
 async def handler(event):
 
     text = event.raw_text.strip()
+    if text == "📥 Telegram Post":
+    await event.reply(
+        "Telegram post link yoki @username yuboring"
+    )
+    return
+
+elif text == "📸 Instagram":
+    await event.reply(
+        "Instagram reel/post/story link yuboring"
+    )
+    return
+
+elif text == "ℹ️ Help":
+    await event.reply(
+        "Bot:\n"
+        "- Telegram post yuklaydi\n"
+        "- Telegram story yuklaydi\n"
+        "- Instagram reel/post/story yuklaydi"
+    )
+    return
 
     if (
         "http" not in text
