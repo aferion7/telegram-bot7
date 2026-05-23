@@ -3,6 +3,7 @@ import re
 import glob
 import shutil
 import instaloader
+
 from flask import Flask
 from threading import Thread
 
@@ -20,7 +21,6 @@ api_id = int(os.getenv("API_ID"))
 api_hash = os.getenv("API_HASH")
 bot_token = os.getenv("BOT_TOKEN")
 
-# Instagram login (optional)
 IG_USERNAME = os.getenv("IG_USERNAME")
 IG_PASSWORD = os.getenv("IG_PASSWORD")
 
@@ -60,8 +60,25 @@ if IG_USERNAME and IG_PASSWORD:
     try:
         L.login(IG_USERNAME, IG_PASSWORD)
         print("Instagram login success")
+
     except Exception as e:
         print("Instagram login error:", e)
+
+# =====================================
+# FLASK
+# =====================================
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot ishlayapti!"
+
+def run_web():
+    app.run(
+        host="0.0.0.0",
+        port=10000
+    )
 
 # =====================================
 # HELPERS
@@ -73,7 +90,6 @@ def clean_downloads():
         shutil.rmtree(DOWNLOAD_DIR)
 
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
 
 def get_latest_file():
 
@@ -94,12 +110,11 @@ def get_latest_file():
 
     return max(files, key=os.path.getctime)
 
-
 def parse_telegram_post(link):
 
     link = link.split("?")[0].strip()
 
-    # private link
+    # private
     m = re.search(
         r"t\.me/c/(\d+)/(\d+)",
         link
@@ -108,9 +123,10 @@ def parse_telegram_post(link):
     if m:
         channel_id = int("-100" + m.group(1))
         post_id = int(m.group(2))
+
         return channel_id, post_id
 
-    # public link
+    # public
     m = re.search(
         r"t\.me/([A-Za-z0-9_]+)/(\d+)",
         link
@@ -119,14 +135,12 @@ def parse_telegram_post(link):
     if m:
         channel = m.group(1)
         post_id = int(m.group(2))
+
         return channel, post_id
 
     return None, None
 
-
 def parse_telegram_story(link):
-
-    # https://t.me/username/s/12
 
     m = re.search(
         r"t\.me/([A-Za-z0-9_]+)/s/(\d+)",
@@ -140,7 +154,6 @@ def parse_telegram_story(link):
         return username, story_id
 
     return None, None
-
 
 # =====================================
 # START
@@ -159,22 +172,6 @@ async def start(event):
         "Kerakli bo‘limni tanlang:",
         buttons=buttons
     )
-# =====================================
-# FLASK
-# =====================================
-
-app = Flask(__name__)
-
-@app.route("/")
-def home():
-    return "Bot ishlayapti!"
-
-
-def run_web():
-    app.run(
-        host="0.0.0.0",
-        port=10000
-    )
 
 # =====================================
 # MAIN HANDLER
@@ -184,26 +181,41 @@ def run_web():
 async def handler(event):
 
     text = event.raw_text.strip()
+
+    # =========================
+    # BUTTONS
+    # =========================
+
     if text == "📥 Telegram Post":
-      await event.reply(
-        "Telegram post link yoki @username yuboring"
-    )
-    return
 
-elif text == "📸 Instagram":
-    await event.reply(
-        "Instagram reel/post/story link yuboring"
-    )
-    return
+        await event.reply(
+            "Telegram post link yoki @username yuboring"
+        )
 
-elif text == "ℹ️ Help":
-    await event.reply(
-        "Bot:\n"
-        "- Telegram post yuklaydi\n"
-        "- Telegram story yuklaydi\n"
-        "- Instagram reel/post/story yuklaydi"
-    )
-    return
+        return
+
+    elif text == "📸 Instagram":
+
+        await event.reply(
+            "Instagram reel/post/story link yuboring"
+        )
+
+        return
+
+    elif text == "ℹ️ Help":
+
+        await event.reply(
+            "Bot:\n"
+            "- Telegram post yuklaydi\n"
+            "- Telegram story yuklaydi\n"
+            "- Instagram reel/post/story yuklaydi"
+        )
+
+        return
+
+    # =========================
+    # FILTER
+    # =========================
 
     if (
         "http" not in text
@@ -225,16 +237,19 @@ elif text == "ℹ️ Help":
 
             entity = await user.get_entity(username)
 
-            posts = await user.get_messages(
+            post = None
+
+            async for msg in user.iter_messages(
                 entity,
                 limit=1
-            )
+            ):
+                post = msg
 
-            if not posts:
-                await event.reply("❌ Post topilmadi.")
+            if not post:
+                await event.reply(
+                    "❌ Post topilmadi."
+                )
                 return
-
-            post = posts[0]
 
             caption = post.text or ""
 
@@ -265,9 +280,11 @@ elif text == "ℹ️ Help":
             username, story_id = parse_telegram_story(text)
 
             if not username:
+
                 await event.reply(
                     "❌ Story link noto‘g‘ri."
                 )
+
                 return
 
             entity = await user.get_entity(username)
@@ -280,9 +297,11 @@ elif text == "ℹ️ Help":
             )
 
             if not result.stories:
+
                 await event.reply(
                     "❌ Story topilmadi."
                 )
+
                 return
 
             story = result.stories[0]
@@ -301,7 +320,7 @@ elif text == "ℹ️ Help":
             return
 
         # =====================================
-        # TELEGRAM POST LINK
+        # TELEGRAM POST
         # =====================================
 
         elif "t.me/" in text:
@@ -309,9 +328,11 @@ elif text == "ℹ️ Help":
             channel, post_id = parse_telegram_post(text)
 
             if not channel:
+
                 await event.reply(
                     "❌ Link noto‘g‘ri."
                 )
+
                 return
 
             entity = await user.get_entity(channel)
@@ -322,9 +343,11 @@ elif text == "ℹ️ Help":
             )
 
             if not post:
+
                 await event.reply(
                     "❌ Post topilmadi yoki kanalga a’zo emassiz."
                 )
+
                 return
 
             caption = post.text or ""
@@ -386,18 +409,18 @@ elif text == "ℹ️ Help":
                 )
 
                 if not m:
+
                     await event.reply(
                         "❌ Story link noto‘g‘ri."
                     )
+
                     return
 
                 username = m.group(1)
 
-                profile = (
-                    instaloader.Profile.from_username(
-                        L.context,
-                        username
-                    )
+                profile = instaloader.Profile.from_username(
+                    L.context,
+                    username
                 )
 
                 found = False
@@ -416,17 +439,21 @@ elif text == "ℹ️ Help":
                         found = True
 
                 if not found:
+
                     await event.reply(
                         "❌ Story topilmadi."
                     )
+
                     return
 
                 file_path = get_latest_file()
 
                 if not file_path:
+
                     await event.reply(
                         "❌ Yuklab bo‘lmadi."
                     )
+
                     return
 
                 await bot.send_file(
@@ -453,9 +480,11 @@ elif text == "ℹ️ Help":
                 file_path = get_latest_file()
 
                 if not file_path:
+
                     await event.reply(
                         "❌ Media topilmadi."
                     )
+
                     return
 
                 caption = post.caption or ""
@@ -486,7 +515,6 @@ elif text == "ℹ️ Help":
             f"❌ Xato:\n{e}"
         )
 
-
 # =====================================
 # MAIN
 # =====================================
@@ -502,7 +530,6 @@ async def main():
     print("Bot ishlayapti...")
 
     await bot.run_until_disconnected()
-
 
 Thread(target=run_web).start()
 
