@@ -185,7 +185,7 @@ async def handler(event):
 
     text = event.raw_text.strip()
     if text == "📥 Telegram Post":
-    await event.reply(
+      await event.reply(
         "Telegram post link yoki @username yuboring"
     )
     return
