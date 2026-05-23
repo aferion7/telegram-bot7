@@ -131,7 +131,7 @@ def parse_telegram_story(link):
 # START
 # =====================================
 
-@bot.on(events.NewMessage(pattern="/start"))
+@bot.on(events.NewMessage(pattern="^/start$"))
 async def start(event):
     buttons = [
         [Button.text("📥 Telegram Post")],
@@ -139,6 +139,7 @@ async def start(event):
         [Button.text("ℹ️ Help")]
     ]
     await event.respond("Kerakli bo'limni tanlang:", buttons=buttons)
+    raise events.StopPropagation
 
 # =====================================
 # MAIN HANDLER
@@ -194,15 +195,15 @@ async def handler(event):
                 return
 
             try:
+                # user client orqali (bot emas!)
                 posts = await user.get_messages(entity, limit=1)
                 if not posts:
                     await event.reply("❌ Post topilmadi.")
                     return
                 post = posts[0]
-            except Exception:
+            except Exception as e:
                 await event.reply(
-                    "❌ Bu username uchun post olib bo'lmadi.\n"
-                    "Kanal public ekanligini tekshiring."
+                    f"❌ Bu username uchun post olib bo'lmadi.\n{e}"
                 )
                 return
 
@@ -227,24 +228,28 @@ async def handler(event):
                 await event.reply("❌ Story link noto'g'ri.")
                 return
 
-            entity = await user.get_entity(username)
+            try:
+                entity = await user.get_entity(username)
 
-            result = await user(
-                GetStoriesByIDRequest(
-                    peer=entity,
-                    id=[story_id]
+                result = await user(
+                    GetStoriesByIDRequest(
+                        peer=entity,
+                        id=[story_id]
+                    )
                 )
-            )
 
-            if not result.stories:
-                await event.reply("❌ Story topilmadi.")
-                return
+                if not result.stories:
+                    await event.reply("❌ Story topilmadi.")
+                    return
 
-            story = result.stories[0]
+                story = result.stories[0]
 
-            file_path = await user.download_media(story.media, file=DOWNLOAD_DIR)
+                file_path = await user.download_media(story.media, file=DOWNLOAD_DIR)
 
-            await bot.send_file(event.chat_id, file_path, caption="Telegram Story")
+                await bot.send_file(event.chat_id, file_path, caption="Telegram Story")
+
+            except Exception as e:
+                await event.reply(f"❌ Story yuklab bo'lmadi.\n{e}")
 
             return
 
@@ -259,21 +264,24 @@ async def handler(event):
                 await event.reply("❌ Link noto'g'ri.")
                 return
 
-            entity = await user.get_entity(channel)
+            try:
+                entity = await user.get_entity(channel)
+                post = await user.get_messages(entity, ids=post_id)
 
-            post = await user.get_messages(entity, ids=post_id)
+                if not post:
+                    await event.reply("❌ Post topilmadi yoki kanalga a'zo emassiz.")
+                    return
 
-            if not post:
-                await event.reply("❌ Post topilmadi yoki kanalga a'zo emassiz.")
-                return
+                caption = post.text or ""
 
-            caption = post.text or ""
+                if post.media:
+                    file_path = await user.download_media(post, file=DOWNLOAD_DIR)
+                    await bot.send_file(event.chat_id, file_path, caption=caption[:1000])
+                else:
+                    await event.reply(caption)
 
-            if post.media:
-                file_path = await user.download_media(post, file=DOWNLOAD_DIR)
-                await bot.send_file(event.chat_id, file_path, caption=caption[:1000])
-            else:
-                await event.reply(caption)
+            except Exception as e:
+                await event.reply(f"❌ Post yuklab bo'lmadi.\n{e}")
 
             return
 
@@ -305,45 +313,53 @@ async def handler(event):
                     await event.reply("❌ Story link noto'g'ri.")
                     return
 
-                username = m.group(1)
+                ig_username = m.group(1)
 
-                profile = instaloader.Profile.from_username(L.context, username)
+                try:
+                    profile = instaloader.Profile.from_username(L.context, ig_username)
 
-                found = False
+                    found = False
 
-                for story in L.get_stories(userids=[profile.userid]):
-                    for item in story.get_items():
-                        L.download_storyitem(item, target=DOWNLOAD_DIR)
-                        found = True
+                    for story in L.get_stories(userids=[profile.userid]):
+                        for item in story.get_items():
+                            L.download_storyitem(item, target=DOWNLOAD_DIR)
+                            found = True
 
-                if not found:
-                    await event.reply("❌ Story topilmadi.")
-                    return
+                    if not found:
+                        await event.reply("❌ Story topilmadi yoki foydalanuvchi private.")
+                        return
 
-                file_path = get_latest_file()
+                    file_path = get_latest_file()
 
-                if not file_path:
-                    await event.reply("❌ Yuklab bo'lmadi.")
-                    return
+                    if not file_path:
+                        await event.reply("❌ Yuklab bo'lmadi.")
+                        return
 
-                await bot.send_file(event.chat_id, file_path, caption="Instagram Story")
+                    await bot.send_file(event.chat_id, file_path, caption="Instagram Story")
+
+                except Exception as e:
+                    await event.reply(f"❌ Instagram story xatosi:\n{e}")
 
                 return
 
             # reel/post
             if shortcode:
-                post = instaloader.Post.from_shortcode(L.context, shortcode)
-                L.download_post(post, target=DOWNLOAD_DIR)
+                try:
+                    post = instaloader.Post.from_shortcode(L.context, shortcode)
+                    L.download_post(post, target=DOWNLOAD_DIR)
 
-                file_path = get_latest_file()
+                    file_path = get_latest_file()
 
-                if not file_path:
-                    await event.reply("❌ Media topilmadi.")
-                    return
+                    if not file_path:
+                        await event.reply("❌ Media topilmadi.")
+                        return
 
-                caption = post.caption or ""
+                    caption = post.caption or ""
 
-                await bot.send_file(event.chat_id, file_path, caption=caption[:1000])
+                    await bot.send_file(event.chat_id, file_path, caption=caption[:1000])
+
+                except Exception as e:
+                    await event.reply(f"❌ Instagram xatosi:\n{e}")
 
                 return
 
