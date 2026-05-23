@@ -21,15 +21,15 @@ logging.basicConfig(level=logging.INFO)
 # CONFIG
 # =====================================
 
-api_id   = int(os.getenv("API_ID"))
-api_hash = os.getenv("API_HASH")
+api_id    = int(os.getenv("API_ID"))
+api_hash  = os.getenv("API_HASH")
 bot_token = os.getenv("BOT_TOKEN")
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # =====================================
-# FLASK  (alohida thread)
+# FLASK
 # =====================================
 
 flask_app = Flask(__name__)
@@ -38,10 +38,7 @@ flask_app = Flask(__name__)
 def home():
     return "Bot ishlayapti!"
 
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=10000)
-
-Thread(target=run_flask, daemon=True).start()
+Thread(target=lambda: flask_app.run(host="0.0.0.0", port=10000), daemon=True).start()
 
 # =====================================
 # HELPERS
@@ -81,28 +78,37 @@ def parse_telegram_story(link):
 
 
 def download_with_ytdlp(url):
+    """yt-dlp orqali yuklab olish — YouTube Shorts ham ishlaydi"""
     clean_downloads()
+
     ydl_opts = {
         "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title).50s.%(ext)s"),
-        "format": "bestvideo[ext=mp4][filesize<45M]+bestaudio[ext=m4a]/best[filesize<45M]/best",
+        # Login talab qilmaydigan eng yaxshi format
+        "format": "best[ext=mp4][filesize<45M]/best[filesize<45M]/best",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
-        "merge_output_format": "mp4",
+        # YouTube Shorts uchun muhim
+        "extractor_args": {
+            "youtube": {
+                "skip": ["hls", "dash"],
+            }
+        },
+        # Cookie ishlatmasdan bypass
+        "age_limit": None,
+        "geo_bypass": True,
     }
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
     return info
 
 # =====================================
-# TELEGRAM CLIENTS
+# CLIENTS
 # =====================================
 
-# user client — story va private postlar uchun
 user_client = TelegramClient("user_session", api_id, api_hash)
-
-# bot client — foydalanuvchi bilan muloqot uchun
-bot_client  = TelegramClient("bot_session", api_id, api_hash)
+bot_client  = TelegramClient("bot_session",  api_id, api_hash)
 
 # =====================================
 # /start
@@ -111,8 +117,8 @@ bot_client  = TelegramClient("bot_session", api_id, api_hash)
 @bot_client.on(events.NewMessage(pattern="^/start$"))
 async def start(event):
     buttons = [
-        [Button.text("▶️ YouTube"),    Button.text("📸 Instagram")],
-        [Button.text("📥 Telegram"),   Button.text("🎵 TikTok")],
+        [Button.text("▶️ YouTube"),  Button.text("📸 Instagram")],
+        [Button.text("📥 Telegram"), Button.text("🎵 TikTok")],
         [Button.text("ℹ️ Help")]
     ]
     await event.respond(
@@ -130,8 +136,7 @@ async def start(event):
 async def handler(event):
     text = event.raw_text.strip()
 
-    # ---------- BUTTON REPLIES ----------
-
+    # ---------- BUTTONS ----------
     if text == "▶️ YouTube":
         await event.reply("YouTube video yoki Shorts linkini yuboring")
         return
@@ -151,27 +156,24 @@ async def handler(event):
         await event.reply(
             "📌 Qo'llab-quvvatlanadigan:\n\n"
             "▶️ youtube.com/watch?v=...\n"
-            "▶️ youtu.be/...\n\n"
+            "▶️ youtu.be/...\n"
+            "▶️ youtube.com/shorts/...\n\n"
             "📸 instagram.com/p/...\n"
-            "📸 instagram.com/reel/...\n"
-            "📸 instagram.com/stories/username/\n\n"
+            "📸 instagram.com/reel/...\n\n"
             "🎵 tiktok.com/@.../video/...\n\n"
-            "📥 t.me/username/123  — post\n"
+            "📥 t.me/username/123   — post\n"
             "📥 t.me/username/s/123 — story\n"
-            "📥 @username — oxirgi post"
-            "👨‍💻 developer - t.me/umaarjonov, t.me/farrukhbec"
+            "📥 @username           — oxirgi post"
         )
         return
 
     # ---------- FILTER ----------
-
     if "http" not in text and not text.startswith("@"):
         return
 
     # ====================================================
-    # TELEGRAM @USERNAME  →  oxirgi media post
+    # @USERNAME → oxirgi media post
     # ====================================================
-
     if text.startswith("@"):
         username = text.lstrip("@").strip()
         msg = await event.reply(f"⏳ @{username} dan yuklanmoqda...")
@@ -189,14 +191,13 @@ async def handler(event):
             return
 
         post = next((m for m in messages if m and m.media), None)
-
         if not post:
             await msg.edit("❌ Oxirgi postlarda media topilmadi.")
             return
 
         try:
             file_path = await user_client.download_media(post, file=DOWNLOAD_DIR)
-            caption = (post.text or "")[:1000]
+            caption   = (post.text or "")[:1000]
             await bot_client.send_file(event.chat_id, file_path, caption=caption)
             await msg.delete()
             if file_path and os.path.exists(file_path):
@@ -206,9 +207,8 @@ async def handler(event):
         return
 
     # ====================================================
-    # TELEGRAM STORY LINK  →  t.me/username/s/123
+    # TELEGRAM STORY → t.me/username/s/123
     # ====================================================
-
     if "t.me/" in text and "/s/" in text:
         msg = await event.reply("⏳ Telegram story yuklanmoqda...")
         username, story_id = parse_telegram_story(text)
@@ -218,7 +218,9 @@ async def handler(event):
             return
 
         try:
+            # MUHIM: user_client ishlatiladi, bot_client EMAS
             entity = await user_client.get_entity(username)
+
             result = await user_client(
                 GetStoriesByIDRequest(peer=entity, id=[story_id])
             )
@@ -227,7 +229,7 @@ async def handler(event):
                 await msg.edit("❌ Story topilmadi yoki muddati o'tgan.")
                 return
 
-            story = result.stories[0]
+            story     = result.stories[0]
             file_path = await user_client.download_media(story.media, file=DOWNLOAD_DIR)
 
             if not file_path:
@@ -236,16 +238,16 @@ async def handler(event):
 
             await bot_client.send_file(event.chat_id, file_path, caption="📖 Telegram Story")
             await msg.delete()
-            os.remove(file_path)
+            if os.path.exists(file_path):
+                os.remove(file_path)
 
         except Exception as e:
             await msg.edit(f"❌ Story yuklab bo'lmadi:\n{e}")
         return
 
     # ====================================================
-    # TELEGRAM POST LINK  →  t.me/username/123
+    # TELEGRAM POST → t.me/username/123
     # ====================================================
-
     if "t.me/" in text:
         msg = await event.reply("⏳ Telegram post yuklanmoqda...")
         channel, post_id = parse_telegram_post(text)
@@ -256,7 +258,7 @@ async def handler(event):
 
         try:
             entity = await user_client.get_entity(channel)
-            post = await user_client.get_messages(entity, ids=post_id)
+            post   = await user_client.get_messages(entity, ids=post_id)
 
             if not post:
                 await msg.edit("❌ Post topilmadi yoki kanalga a'zo emassiz.")
@@ -268,7 +270,8 @@ async def handler(event):
                 file_path = await user_client.download_media(post, file=DOWNLOAD_DIR)
                 await bot_client.send_file(event.chat_id, file_path, caption=caption)
                 await msg.delete()
-                os.remove(file_path)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
             else:
                 await msg.edit(caption or "❌ Bu postda media yo'q.")
 
@@ -277,16 +280,15 @@ async def handler(event):
         return
 
     # ====================================================
-    # YOUTUBE / INSTAGRAM / TIKTOK  →  yt-dlp
+    # YOUTUBE / INSTAGRAM / TIKTOK → yt-dlp
     # ====================================================
-
-    is_yt  = any(x in text for x in ["youtube.com", "youtu.be"])
-    is_ig  = "instagram.com" in text
-    is_tt  = "tiktok.com" in text
+    is_yt = any(x in text for x in ["youtube.com", "youtu.be"])
+    is_ig = "instagram.com" in text
+    is_tt = "tiktok.com" in text
 
     if is_yt or is_ig or is_tt:
         label = "▶️ YouTube" if is_yt else ("📸 Instagram" if is_ig else "🎵 TikTok")
-        msg = await event.reply(f"⏳ {label} yuklanmoqda...")
+        msg   = await event.reply(f"⏳ {label} yuklanmoqda...")
 
         try:
             loop = asyncio.get_event_loop()
@@ -300,7 +302,7 @@ async def handler(event):
                 await msg.edit("❌ Yuklab bo'lmadi. Link ochiq (public) ekanligini tekshiring.")
                 return
 
-            title = (info.get("title", "") or "")[:200]
+            title   = (info.get("title", "") or "")[:200] if info else ""
             caption = f"🎬 {title}" if title else label
 
             for i, f in enumerate(files):
@@ -317,11 +319,33 @@ async def handler(event):
         except yt_dlp.utils.DownloadError as e:
             err = str(e).lower()
             if "private" in err:
-                await msg.edit("❌ Bu post private. Faqat public kontentni yuklab olish mumkin.")
+                await msg.edit("❌ Bu post private.")
             elif "unavailable" in err or "removed" in err:
                 await msg.edit("❌ Video mavjud emas yoki o'chirilgan.")
-            elif "login" in err or "sign in" in err:
-                await msg.edit("❌ Bu kontent login talab qiladi (private akkaunt).")
+            elif "login" in err or "sign in" in err or "age" in err:
+                # Login xatosi bo'lsa cookies bilan qayta urinib ko'ramiz
+                await msg.edit("⏳ Boshqa usul bilan yuklanmoqda...")
+                try:
+                    ydl_opts2 = {
+                        "outtmpl": os.path.join(DOWNLOAD_DIR, "%(title).50s.%(ext)s"),
+                        "format": "worst[ext=mp4]/worst",
+                        "noplaylist": True,
+                        "quiet": True,
+                    }
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None,
+                        lambda: __import__('yt_dlp').YoutubeDL(ydl_opts2).__enter__().download([text])
+                    )
+                    files2 = get_all_media_files()
+                    if files2:
+                        for f in files2:
+                            await bot_client.send_file(event.chat_id, f, caption=label)
+                        await msg.delete()
+                    else:
+                        await msg.edit("❌ Bu video yuklab bo'lmadi (himoyalangan kontent).")
+                except Exception:
+                    await msg.edit("❌ Bu video yuklab bo'lmadi (himoyalangan kontent).")
             else:
                 await msg.edit(f"❌ Yuklab bo'lmadi:\n{str(e)[:300]}")
         except Exception as e:
@@ -330,22 +354,19 @@ async def handler(event):
 
     await event.reply("❌ Link tushunilmadi. /start bosing.")
 
-# ====================================================
-# MAIN  —  bir loop da ikki client
-# ====================================================
+# =====================================
+# MAIN
+# =====================================
 
 async def main():
-    # user_client telefon sessiyasi bilan ishga tushadi
     await user_client.start()
     print("✅ User client ulandi")
 
-    # bot_client token bilan ishga tushadi
     await bot_client.start(bot_token=bot_token)
     print("✅ Bot client ulandi")
 
     print("🚀 Bot ishlayapti...")
 
-    # Ikkalasi bir vaqtda ishlaydi
     await asyncio.gather(
         user_client.run_until_disconnected(),
         bot_client.run_until_disconnected()
