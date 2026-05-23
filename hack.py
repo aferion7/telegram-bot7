@@ -3,6 +3,8 @@ import re
 import glob
 import shutil
 import instaloader
+from flask import Flask
+from threading import Thread
 
 from telethon import TelegramClient, events, Button
 from telethon.tl.functions.stories import GetStoriesByIDRequest
@@ -157,7 +159,22 @@ async def start(event):
         "Kerakli bo‘limni tanlang:",
         buttons=buttons
     )
+# =====================================
+# FLASK
+# =====================================
 
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot ishlayapti!"
+
+
+def run_web():
+    app.run(
+        host="0.0.0.0",
+        port=10000
+    )
 
 # =====================================
 # MAIN HANDLER
@@ -486,6 +503,8 @@ async def main():
 
     await bot.run_until_disconnected()
 
+
+Thread(target=run_web).start()
 
 with user:
     user.loop.run_until_complete(main())
