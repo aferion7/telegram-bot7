@@ -2,6 +2,7 @@ import os
 import re
 from telethon import TelegramClient, events
 from dotenv import load_dotenv
+from telethon.tl.types import PeerChannel
 
 load_dotenv()
 
@@ -74,17 +75,19 @@ async def handler(event):
             entity = await user.get_entity(channel)
 
         # PRIVATE kanal
-        else:
-            entity = await find_private_channel(channel)
+      else:
+            from telethon.tl.types import PeerChannel
 
-            if not entity:
-                await event.reply(
-                    "❌ Kanal topilmadi.\n\n"
-                    "User akkaunt kanal ichida ekanini tekshir."
-                )
-                return
+               peer = PeerChannel(
+                 int(str(channel).replace("-100", "")))
 
-        post = await user.get_messages(entity, ids=post_id)
+                 post = await user.get_messages(
+                   peer,
+                   ids=post_id)
+
+    if not post:
+        await event.reply("❌ Post topilmadi.")
+        return
 
         if not post:
             await event.reply("❌ Post topilmadi.")
