@@ -128,9 +128,9 @@ if __name__ == "__main__":
                 if chunk:
                     f.write(chunk)
 
-       def download_video():
-           file_path = "downloads/video.mp4"
-           data = {"filename": "video.mp4"}
+def download_video():
+    file_path = "downloads/video.mp4"
+    data = {"filename": "video.mp4"}
 
     return file_path, data.get("filename", "video.mp4")
 
