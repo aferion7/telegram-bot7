@@ -1,6 +1,6 @@
-Flask==2.2.5
-pyTelegramBotAPI==4.12.0
-telethon==1.27.0
-instaloader==4.11.2
-pytube==12.1.0
-python-dotenv==1.0.0
+Flask
+pyTelegramBotAPI
+telethon
+instaloader
+pytube
+python-dotenv
