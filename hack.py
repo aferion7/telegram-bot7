@@ -114,7 +114,8 @@ def run_bot():
 
 if __name__ == "__main__":
     Thread(target=run_bot).start()
-    app.run(host='0.0.0.0', port=5000)    if status in ("redirect", "tunnel"):
+    app.run(host='0.0.0.0', port=5000)    
+    if status in ("redirect", "tunnel"):
         video_url = data.get("url")
         if not video_url:
             raise Exception("Video URL topilmadi")
