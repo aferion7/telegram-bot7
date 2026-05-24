@@ -1,113 +1,120 @@
 import os
-import re
-import glob
-import shutil
 import asyncio
-import logging
-import requests
-
-from flask import Flask
 from threading import Thread
-
-from telethon import TelegramClient, events, Button
-from telethon.tl.functions.stories import GetStoriesByIDRequest
+from flask import Flask
+import telebot
+from telethon import TelegramClient
+from telethon.tl.functions.messages import GetHistoryRequest
+import instaloader
+from pytube import YouTube
 from dotenv import load_dotenv
 
+# -------------------- ENV --------------------
 load_dotenv()
-logging.basicConfig(level=logging.INFO)
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+API_ID = int(os.getenv("TELEGRAM_API_ID"))
+API_HASH = os.getenv("TELEGRAM_API_HASH")
 
-# =====================================
-# CONFIG
-# =====================================
+# -------------------- Flask va Bot --------------------
+app = Flask(__name__)
+bot = telebot.TeleBot(BOT_TOKEN)
+client = TelegramClient('session_name', API_ID, API_HASH)
+L = instaloader.Instaloader()
 
-api_id    = int(os.getenv("API_ID"))
-api_hash  = os.getenv("API_HASH")
-bot_token = os.getenv("BOT_TOKEN")
-
-DOWNLOAD_DIR = "downloads"
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-# =====================================
-# FLASK
-# =====================================
-
-flask_app = Flask(__name__)
-
-@flask_app.route("/")
-def home():
-    return "Bot ishlayapti!"
-
-Thread(target=lambda: flask_app.run(host="0.0.0.0", port=10000), daemon=True).start()
-
-# =====================================
-# HELPERS
-# =====================================
-
-def clean_downloads():
-    if os.path.exists(DOWNLOAD_DIR):
-        shutil.rmtree(DOWNLOAD_DIR)
-    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-
-def get_all_media_files():
-    files = glob.glob(f"{DOWNLOAD_DIR}/**/*", recursive=True)
-    return sorted(
-        [f for f in files if os.path.isfile(f)
-         and not f.endswith((".json", ".txt", ".part", ".ytdl", ".xz"))],
-        key=os.path.getctime
-    )
-
-
-def parse_telegram_post(link):
-    link = link.split("?")[0].strip()
-    m = re.search(r"t\.me/c/(\d+)/(\d+)", link)
-    if m:
-        return int("-100" + m.group(1)), int(m.group(2))
-    m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)", link)
-    if m:
-        return m.group(1), int(m.group(2))
-    return None, None
-
-
-def parse_telegram_story(link):
-    m = re.search(r"t\.me/([A-Za-z0-9_]+)/s/(\d+)", link)
-    if m:
-        return m.group(1), int(m.group(2))
-    return None, None
-
-
+# -------------------- Helper functions --------------------
+# YouTube yuklash
 def download_youtube(url):
-    """
-    cobalt.tools API orqali YouTube yuklab olish
-    Login talab qilmaydi, Shorts ham ishlaydi
-    """
-    clean_downloads()
-
     try:
-        resp = requests.post(
-            "https://api.cobalt.tools/",
-            json={
-                "url": url,
-                "videoQuality": "720",
-                "filenameStyle": "basic",
-            },
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            timeout=30
-        )
-        data = resp.json()
+        yt = YouTube(url)
+        stream = yt.streams.get_highest_resolution()
+        os.makedirs('downloads', exist_ok=True)
+        filename = stream.download('downloads')
+        return filename
     except Exception as e:
-        raise Exception(f"API xatosi: {e}")
+        return f"Xatolik YouTube: {str(e)}"
 
-    status = data.get("status")
+# Instagram yuklash
+def download_instagram_post(url):
+    try:
+        os.makedirs('downloads', exist_ok=True)
+        shortcode = url.split("/")[-2]
+        post = instaloader.Post.from_shortcode(L.context, shortcode)
+        L.download_post(post, target='downloads')
+        return 'Instagram post yuklandi!'
+    except Exception as e:
+        return f"Xatolik Instagram: {str(e)}"
 
-    if status == "error":
-        raise Exception(data.get("error", {}).get("code", "Yuklab bo'lmadi"))
+# Telegram postlarni olish
+async def get_telegram_post(channel_username, limit=1):
+    try:
+        await client.start()
+        channel = await client.get_entity(channel_username)
+        posts = await client(GetHistoryRequest(
+            peer=channel,
+            limit=limit,
+            offset_date=None,
+            offset_id=0,
+            max_id=0,
+            min_id=0,
+            add_offset=0,
+            hash=0
+        ))
+        result = []
+        for msg in posts.messages:
+            if msg.media:
+                result.append(msg)
+        return result
+    except Exception as e:
+        return f"Xatolik Telegram: {str(e)}"
 
-    # To'g'ridan to'g'ri URL
-    if status in ("redirect", "tunnel"):
+# Telegram postlarni yuklash va yuborish
+async def handle_telegram_download(message, url):
+    username = url.split('/')[-1]
+    posts = await get_telegram_post(username)
+    if isinstance(posts, str):
+        bot.reply_to(message, posts)
+    elif len(posts) == 0:
+        bot.reply_to(message, "Post topilmadi yoki media yo‘q.")
+    else:
+        bot.reply_to(message, "Post topildi! Lekin media yuborish hali qo‘shimcha qilinadi.") 
+
+# -------------------- Bot handler --------------------
+@bot.message_handler(commands=['start'])
+def start(message):
+    bot.reply_to(message, "Salom! Link yuboring, men uni yuklab beraman 🎬📸")
+
+@bot.message_handler(func=lambda message: True)
+def handle_message(message):
+    url = message.text.strip()
+    if "youtube.com" in url or "youtu.be" in url:
+        bot.reply_to(message, "YouTube videoni yuklab olaman...")
+        filename = download_youtube(url)
+        if os.path.exists(filename):
+            bot.send_video(message.chat.id, open(filename, 'rb'))
+        else:
+            bot.reply_to(message, filename)
+    elif "instagram.com" in url:
+        bot.reply_to(message, "Instagram postini yuklab olaman...")
+        result = download_instagram_post(url)
+        bot.reply_to(message, result)
+    elif "t.me/" in url:
+        bot.reply_to(message, "Telegram postini yuklab olaman...")
+        asyncio.run(handle_telegram_download(message, url))
+    else:
+        bot.reply_to(message, "Faqat YouTube, Instagram yoki Telegram linklarini yuboring!")
+
+# -------------------- Flask route --------------------
+@app.route('/')
+def index():
+    return "Bot server ishlayapti!"
+
+# -------------------- Botni Threadda ishga tushirish --------------------
+def run_bot():
+    bot.infinity_polling()
+
+if __name__ == "__main__":
+    Thread(target=run_bot).start()
+    app.run(host='0.0.0.0', port=5000)    if status in ("redirect", "tunnel"):
         video_url = data.get("url")
         if not video_url:
             raise Exception("Video URL topilmadi")
