@@ -4,3 +4,4 @@ telethon
 instaloader
 pytube
 python-dotenv
+pip install python-telegram-bot
