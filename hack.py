@@ -1,7 +1,6 @@
 import os
 import re
 from telethon import TelegramClient, events
-from telethon.tl.functions.channels import JoinChannelRequest
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,24 +33,7 @@ def parse_link(link):
 
 @bot.on(events.NewMessage(pattern="/start"))
 async def start(event):
-    await event.reply(
-        "Post link yubor. Masalan:\n"
-        "https://t.me/c/1234567890/45\n\n"
-        "Maxfiy kanal uchun avval /join buyrug'ini ishlating:\n"
-        "/join https://t.me/+invitelink"
-    )
-
-
-# ✅ YANGI: Kanalga qo'shilish buyrug'i
-@bot.on(events.NewMessage(pattern=r"/join (.+)"))
-async def join_channel(event):
-    invite_link = event.pattern_match.group(1).strip()
-    try:
-        await event.reply("⏳ Kanalga qo'shilmoqdaman...")
-        await user(JoinChannelRequest(invite_link))
-        await event.reply("✅ Kanalga muvaffaqiyatli qo'shildim!")
-    except Exception as e:
-        await event.reply(f"❌ Qo'shila olmadim:\n{e}")
+    await event.reply("Post link yubor. Masalan:\nhttps://t.me/c/1234567890/45")
 
 
 @bot.on(events.NewMessage)
@@ -68,15 +50,10 @@ async def handler(event):
         return
 
     try:
-        # ✅ Avval entity olishga harakat
         try:
             entity = await user.get_entity(channel)
         except Exception as e:
-            await event.reply(
-                f"❌ Kanal topilmadi: {e}\n\n"
-                f"Agar maxfiy kanal bo'lsa, avval qo'shiling:\n"
-                f"/join https://t.me/+invitelink"
-            )
+            await event.reply(f"❌ Kanal topilmadi:\n{e}")
             return
 
         post = await user.get_messages(entity, ids=post_id)
@@ -97,7 +74,6 @@ async def handler(event):
                     file_path,
                     caption=caption[:1000]
                 )
-                # ✅ Faylni o'chirib yuborish (joy tejash)
                 os.remove(file_path)
             else:
                 await event.reply("❌ Media yuklab bo'lmadi.")
