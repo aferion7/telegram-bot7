@@ -1,8 +1,8 @@
 import os
 import re
 from telethon import TelegramClient, events
-from dotenv import load_dotenv
 from telethon.tl.types import PeerChannel
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -13,41 +13,59 @@ bot_token = os.getenv("BOT_TOKEN")
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-user = TelegramClient("user_session", api_id, api_hash)
-bot = TelegramClient("bot_session", api_id, api_hash)
+# USER account session
+user = TelegramClient(
+    "user_session",
+    api_id,
+    api_hash
+)
+
+# BOT session
+bot = TelegramClient(
+    "bot_session",
+    api_id,
+    api_hash
+)
 
 
 def parse_link(link):
+
     link = link.split("?")[0].strip()
 
-    # private kanal
-    m = re.search(r"t\.me/c/(\d+)/(\d+)", link)
+    # PRIVATE kanal
+    m = re.search(
+        r"t\.me/c/(\d+)/(\d+)",
+        link
+    )
+
     if m:
+
         channel_id = int("-100" + m.group(1))
         post_id = int(m.group(2))
+
         return channel_id, post_id
 
-    # public kanal
-    m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)", link)
+    # PUBLIC kanal
+    m = re.search(
+        r"t\.me/([A-Za-z0-9_]+)/(\d+)",
+        link
+    )
+
     if m:
+
         channel = m.group(1)
         post_id = int(m.group(2))
+
         return channel, post_id
 
     return None, None
 
 
-async def find_private_channel(channel_id):
-    async for dialog in user.iter_dialogs():
-        if dialog.id == abs(channel_id):
-            return dialog.entity
-    return None
-
-
 @bot.on(events.NewMessage(pattern="/start"))
 async def start(event):
+
     await event.reply(
-        "Link yubor.\n\n"
+        "📥 Telegram post link yubor.\n\n"
         "Misol:\n"
         "https://t.me/c/1234567890/45"
     )
@@ -55,9 +73,13 @@ async def start(event):
 
 @bot.on(events.NewMessage)
 async def handler(event):
+
     text = event.raw_text.strip()
 
-    if "t.me/" not in text or text.startswith("/"):
+    if text.startswith("/"):
+        return
+
+    if "t.me/" not in text:
         return
 
     await event.reply("⏳ Yuklayapman...")
@@ -65,6 +87,7 @@ async def handler(event):
     channel, post_id = parse_link(text)
 
     if not channel:
+
         await event.reply("❌ Link noto'g'ri.")
         return
 
@@ -72,33 +95,39 @@ async def handler(event):
 
         # PUBLIC kanal
         if isinstance(channel, str):
+
             entity = await user.get_entity(channel)
 
+            post = await user.get_messages(
+                entity,
+                ids=post_id
+            )
+
         # PRIVATE kanal
-      else:
-            from telethon.tl.types import PeerChannel
+        else:
 
-               peer = PeerChannel(
-                 int(str(channel).replace("-100", "")))
+            peer = PeerChannel(
+                int(str(channel).replace("-100", ""))
+            )
 
-                 post = await user.get_messages(
-                   peer,
-                   ids=post_id)
-
-    if not post:
-        await event.reply("❌ Post topilmadi.")
-        return
+            post = await user.get_messages(
+                peer,
+                ids=post_id
+            )
 
         if not post:
+
             await event.reply("❌ Post topilmadi.")
             return
 
         caption = post.text or ""
 
-        # media bo'lsa
+        # MEDIA bo'lsa
         if post.media:
 
-            await event.reply("📥 Media yuklanmoqda...")
+            await event.reply(
+                "📥 Media yuklanmoqda..."
+            )
 
             file_path = await user.download_media(
                 post,
@@ -106,7 +135,11 @@ async def handler(event):
             )
 
             if not file_path:
-                await event.reply("❌ Yuklab bo'lmadi.")
+
+                await event.reply(
+                    "❌ Media yuklab bo'lmadi."
+                )
+
                 return
 
             await bot.send_file(
@@ -120,18 +153,33 @@ async def handler(event):
             except:
                 pass
 
+        # MEDIA yo'q bo'lsa
         else:
-            await event.reply(caption or "❌ Post bo'sh.")
+
+            await event.reply(
+                caption or "❌ Post bo'sh."
+            )
 
     except Exception as e:
-        await event.reply(f"❌ Xato:\n{str(e)}")
+
+        await event.reply(
+            f"❌ Xato:\n{str(e)}"
+        )
 
 
 async def main():
-    await user.start()
-    await bot.start(bot_token=bot_token)
 
-    print("Bot ishlayapti...")
+    print("User login...")
+
+    await user.start()
+
+    print("Bot login...")
+
+    await bot.start(
+        bot_token=bot_token
+    )
+
+    print("✅ Bot ishlayapti...")
 
     await bot.run_until_disconnected()
 
