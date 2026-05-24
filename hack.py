@@ -1,157 +1,90 @@
 import os
-from threading import Thread
-from flask import Flask
-import telebot
+import re
+from telethon import TelegramClient, events
 from dotenv import load_dotenv
-from pytube import YouTube
-import instaloader
-
-# ================= ENV =================
 load_dotenv()
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+api_id = int(os.getenv("API_ID"))          # o'zingni API ID
+api_hash = os.getenv("API_HASH" )   # o'zingni API HASH
+bot_token = os.getenv("BOT_TOKEN")  # BotFather bergan token
 
-bot = telebot.TeleBot(BOT_TOKEN)
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ================= FLASK =================
-app = Flask(__name__)
+user = TelegramClient("user_session", api_id, api_hash)
+bot = TelegramClient("bot_session", api_id, api_hash)
 
-@app.route("/")
-def home():
-    return "Bot ishlayapti!"
 
-# ================= DOWNLOADS PAPKA =================
-os.makedirs("downloads", exist_ok=True)
+def parse_link(link):
+    link = link.split("?")[0].strip()
 
-# ================= INSTAGRAM =================
-L = instaloader.Instaloader(
-    download_pictures=True,
-    download_videos=True,
-    download_video_thumbnails=False,
-    save_metadata=False,
-    post_metadata_txt_pattern=""
-)
+    # private link: https://t.me/c/1234567890/45
+    m = re.search(r"t\.me/c/(\d+)/(\d+)", link)
+    if m:
+        channel_id = int("-100" + m.group(1))
+        post_id = int(m.group(2))
+        return channel_id, post_id
 
-# ================= YOUTUBE =================
-def download_youtube(url):
+    # public link: https://t.me/channelusername/45
+    m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)", link)
+    if m:
+        channel = m.group(1)
+        post_id = int(m.group(2))
+        return channel, post_id
+
+    return None, None
+
+
+@bot.on(events.NewMessage(pattern="/start"))
+async def start(event):
+    await event.reply("Post link yubor. Masalan:\nhttps://t.me/c/1234567890/45")
+
+
+@bot.on(events.NewMessage)
+async def handler(event):
+    text = event.raw_text.strip()
+
+    if "t.me/" not in text:
+        return
+
+    await event.reply("⏳ Yuklayapman...")
+
+    channel, post_id = parse_link(text)
+
+    if not channel:
+        await event.reply("❌ Link noto‘g‘ri.")
+        return
+
     try:
-        yt = YouTube(url)
+        entity = await user.get_entity(channel)
+        post = await user.get_messages(entity, ids=post_id)
 
-        stream = yt.streams.filter(
-            progressive=True,
-            file_extension="mp4"
-        ).order_by("resolution").desc().first()
+        if not post:
+            await event.reply("❌ Post topilmadi. Kanalga a’zo ekaningni tekshir.")
+            return
 
-        file_path = stream.download(output_path="downloads")
+        caption = post.text or "Media"
 
-        return file_path
+        if post.media:
+            file_path = await user.download_media(post, file=DOWNLOAD_DIR)
+            await bot.send_file(
+                event.chat_id,
+                file_path,
+                caption=caption[:1000]
+            )
+        else:
+            await event.reply(caption)
 
     except Exception as e:
-        return str(e)
+        await event.reply(f"❌ Xato:\n{e}")
 
-# ================= INSTAGRAM =================
-def download_instagram(url):
-    try:
-        shortcode = url.split("/")[-2]
 
-        post = instaloader.Post.from_shortcode(
-            L.context,
-            shortcode
-        )
+async def main():
+    await user.start()
+    await bot.start(bot_token=bot_token)
+    print("Bot ishlayapti...")
+    await bot.run_until_disconnected()
 
-        L.download_post(post, target="downloads")
 
-        files = os.listdir("downloads")
-
-        for file in files:
-            if file.endswith(".mp4") or file.endswith(".jpg"):
-                return os.path.join("downloads", file)
-
-        return None
-
-    except Exception as e:
-        return str(e)
-
-# ================= START =================
-@bot.message_handler(commands=["start"])
-def start(message):
-    bot.reply_to(
-        message,
-        "Link yuboring 🎬\n\nYouTube yoki Instagram"
-    )
-
-# ================= HANDLE =================
-@bot.message_handler(func=lambda m: True)
-def handle(message):
-
-    url = message.text.strip()
-
-    # ========= YOUTUBE =========
-    if "youtube.com" in url or "youtu.be" in url:
-
-        msg = bot.reply_to(message, "YouTube video yuklanmoqda...")
-
-        result = download_youtube(url)
-
-        if os.path.exists(result):
-
-            with open(result, "rb") as video:
-                bot.send_video(message.chat.id, video)
-
-            os.remove(result)
-
-        else:
-            bot.edit_message_text(
-                f"Xato:\n{result}",
-                chat_id=message.chat.id,
-                message_id=msg.message_id
-            )
-
-    # ========= INSTAGRAM =========
-    elif "instagram.com" in url:
-
-        msg = bot.reply_to(message, "Instagram post yuklanmoqda...")
-
-        result = download_instagram(url)
-
-        if result and os.path.exists(result):
-
-            if result.endswith(".mp4"):
-
-                with open(result, "rb") as video:
-                    bot.send_video(message.chat.id, video)
-
-            else:
-
-                with open(result, "rb") as photo:
-                    bot.send_photo(message.chat.id, photo)
-
-            os.remove(result)
-
-        else:
-
-            bot.edit_message_text(
-                f"Xato:\n{result}",
-                chat_id=message.chat.id,
-                message_id=msg.message_id
-            )
-
-    else:
-        bot.reply_to(
-            message,
-            "Faqat Instagram yoki YouTube link yuboring."
-        )
-
-# ================= BOT =================
-def run_bot():
-    bot.infinity_polling(timeout=60, long_polling_timeout=60)
-
-# ================= MAIN =================
-if __name__ == "__main__":
-
-    Thread(target=run_bot).start()
-
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000))
-    )
+with user:
+    user.loop.run_until_complete(main())
