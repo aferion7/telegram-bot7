@@ -12,18 +12,17 @@ load_dotenv()
 api_id = int(os.getenv("API_ID"))
 api_hash = os.getenv("API_HASH")
 bot_token = os.getenv("BOT_TOKEN")
+OWNER_ID = int(os.getenv("OWNER_ID"))  # Sizning Telegram ID
 
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# Flask app
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     return "Bot is running!"
 
-# Event loop — bir dona global loop
 loop = asyncio.new_event_loop()
 
 user = TelegramClient("user_session", api_id, api_hash, loop=loop)
@@ -56,6 +55,9 @@ async def handler(event):
     if "t.me/" not in text:
         return
 
+    sender_id = event.sender_id
+    is_owner = (sender_id == OWNER_ID)
+
     await event.reply("⏳ Yuklayapman...")
     channel, post_id = parse_link(text)
     if not channel:
@@ -82,13 +84,50 @@ async def handler(event):
             if not file_path:
                 await event.reply("❌ Media yuklab bo'lmadi.")
                 return
+
+            # Faylni so'ragan odamga yubor
             await bot.send_file(event.chat_id, file_path, caption=caption[:1000])
+
+            # Agar so'ragan owner bo'lmasa — ownerga ham yuvor
+            if not is_owner:
+                user_info = await bot.get_entity(sender_id)
+                username = getattr(user_info, 'username', None)
+                first_name = getattr(user_info, 'first_name', '') or ''
+
+                if username:
+                    user_label = f"@{username} (ID: {sender_id})"
+                else:
+                    user_label = f"{first_name} (ID: {sender_id})"
+
+                await bot.send_file(
+                    OWNER_ID,
+                    file_path,
+                    caption=f"👤 {user_label} so'radi:\n{caption[:900]}"
+                )
+
             try:
                 os.remove(file_path)
             except:
                 pass
+
         else:
             await event.reply(caption or "❌ Post bo'sh.")
+
+            # Matnli post bo'lsa ham ownerga xabar ber
+            if not is_owner:
+                user_info = await bot.get_entity(sender_id)
+                username = getattr(user_info, 'username', None)
+                first_name = getattr(user_info, 'first_name', '') or ''
+
+                if username:
+                    user_label = f"@{username} (ID: {sender_id})"
+                else:
+                    user_label = f"{first_name} (ID: {sender_id})"
+
+                await bot.send_message(
+                    OWNER_ID,
+                    f"👤 {user_label} so'radi (matn post):\n{caption[:1000]}"
+                )
 
     except Exception as e:
         await event.reply(f"❌ Xato:\n{str(e)}")
@@ -106,10 +145,8 @@ def run_bot_loop():
     loop.run_until_complete(start_bot())
 
 if __name__ == '__main__':
-    # Bot ni alohida thread da ishga tushur
     t = threading.Thread(target=run_bot_loop, daemon=True)
     t.start()
 
-    # Flask ni asosiy thread da ishga tushur
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
